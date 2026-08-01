@@ -1,0 +1,18 @@
+{
+  "name": "@red-cup-engineering/claude-harness-projection-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Projects a machine-specific Claude actor's office-roster policy into one project-local .claude/agents/ runtime substrate, by calling the settlement's own installing-claude-as-an-agent instrument once per colleague office.",
+  "bin": {
+    "project-claude-harness": "./scripts/project-claude-harness.mjs"
+  },
+  "scripts": {
+    "check": "node --check src/projector.mjs && node --check scripts/project-claude-harness.mjs",
+    "test": "node --test test/*.test.mjs",
+    "verify": "npm run check && npm test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
