@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // The projector never authors an agent file itself — it calls the one
 // instrument that does, found by the same up-walk every sibling caller in
@@ -9,9 +10,15 @@ import { dirname, join, resolve } from "node:path";
 const PROJECTOR_SHAPE =
   "lib/emsenn/services/561-group/services/board-of-directors/services/executive-office/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
 
+// The instrument is revived beside this projector (scripts/), so a repository
+// that does not hold Bare Cedar Fog's tree can still project. The repository
+// shape wins where it exists: it is the one the Group maintains.
+const REVIVED_PROJECTOR = join(dirname(fileURLToPath(import.meta.url)), "../scripts/install-claude-as-an-agent.js");
+
 export function resolveOfficeProjector(repoRoot) {
   const direct = join(repoRoot, PROJECTOR_SHAPE);
   if (existsSync(direct)) return direct;
+  if (existsSync(REVIVED_PROJECTOR)) return REVIVED_PROJECTOR;
   throw new Error(`office projector is absent at the expected repository shape: ${direct}`);
 }
 
@@ -51,6 +58,9 @@ export function loadPolicy(policyPath) {
         `${policyPath} names no seating (character + incumbency) for colleague office '${id}' in colleagueSeatings`,
       );
     }
+  }
+  if (policy.skillPools !== undefined && (!Array.isArray(policy.skillPools) || policy.skillPools.some((p) => typeof p !== "string"))) {
+    throw new Error(`${policyPath} declares skillPools that is not an array of repository-relative paths`);
   }
   if (
     typeof policy.rootSeating !== "object" ||
@@ -104,9 +114,10 @@ export function projectClaudeHarness({ policyPath, repoRoot, target = repoRoot, 
     if (!existsSync(officePath)) throw new Error(`policy names an office that seats nowhere: ${officePath}`);
     const id = office.split("/").at(-1).replace(/\.json$/u, "");
     const { characterPath, incumbencyPath } = verifyIncumbency(policy.colleagueSeatings[id], repoRoot, id);
+    const poolFlags = (policy.skillPools ?? []).flatMap((pool) => ["--skills-pool", pool]);
     const result = spawnSync(
       process.execPath,
-      [projector, officePath, target, "--root", repoRoot, "--character", characterPath, "--incumbency", incumbencyPath, ...flags],
+      [projector, officePath, target, "--root", repoRoot, "--character", characterPath, "--incumbency", incumbencyPath, ...poolFlags, ...flags],
       { cwd: repoRoot, encoding: "utf8" },
     );
     if (result.status !== 0) {

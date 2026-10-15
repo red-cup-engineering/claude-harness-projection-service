@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { checkExactRoster, colleagueIds, loadPolicy, projectClaudeHarness } from "../src/projector.mjs";
@@ -379,6 +379,74 @@ test("projectClaudeHarness refuses a root office whose incumbency holder is not 
       () => projectClaudeHarness({ policyPath, repoRoot: scratch, dryRun: true }),
       /is kind 'person', not 'session' — refusing to project a bare office with no officer behind it/,
     );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+
+/** Receiving: a non-Bare-Cedar-Fog repository calls the *actual* source-owned
+ * installer, not a stub at the legacy absolute tree shape. Office, character,
+ * and incumbency are real fixture records; the skill comes from a separately
+ * selected projected pool that the ordinary recursive scan must ignore.
+ */
+test("portable owner installer receives seated office and independently projected skill", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-harness-portable-"));
+  try {
+    seatColleague(scratch);
+    seatRoot(scratch);
+    const officePath = join(scratch, "content/offices/test-office.json");
+    writeFileSync(officePath, JSON.stringify({
+      kind: "office", id: "test-office", name: "Test Office",
+      "normative-structure": "Discharge the verified fixture duty.",
+      "provides-skill": ["verified-test"]
+    }));
+    const skillPool = join(scratch, "projected-pool");
+    mkdirSync(join(skillPool, "verified-test"), { recursive: true });
+    writeFileSync(join(skillPool, "verified-test", "SKILL.md"),
+      "---\nname: verified-test\ndescription: Portable source-backed skill.\n---\n\nPortable source-backed skill body.\n");
+    symlinkSync(skillPool, join(scratch, "aliased-projected-pool"), "dir");
+    const policyPath = join(scratch, "policy.json");
+    writeFileSync(policyPath, JSON.stringify({
+      type: "ClaudeAgentHarnessProjection", actor: "urn:ame:test-actor",
+      rootOffice: "test-root-office",
+      colleagueOffices: ["content/offices/test-office.json"],
+      ...seatings(), skillPools: ["projected-pool", "aliased-projected-pool"]
+    }));
+    const receiving = projectClaudeHarness({ policyPath, repoRoot: scratch });
+    assert.deepEqual(receiving.colleagues, ["test-office"]);
+    assert.equal(receiving.receipts.length, 1);
+    const agentPath = join(scratch, ".claude/agents/test-office.md");
+    const accepted = readFileSync(agentPath, "utf8");
+    assert.match(accepted, /Portable source-backed skill body\./);
+    assert.match(accepted, /test-office-session/);
+    assert.equal(accepted.split("### verified-test").length, 2, "aliased pools provide one skill");
+    assert.deepEqual(checkExactRoster({ policyPath, repoRoot: scratch }).colleagues, ["test-office"]);
+    const next = projectClaudeHarness({ policyPath, repoRoot: scratch });
+    assert.equal(next.receipts.length, 1);
+    assert.equal(readFileSync(agentPath, "utf8"), accepted, "repeating installation preserves exact projection");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("portable projection refuses to invent an unseated colleague", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-harness-portable-refusal-"));
+  try {
+    seatRoot(scratch);
+    mkdirSync(join(scratch, "content/offices"), { recursive: true });
+    writeFileSync(join(scratch, "content/offices/test-office.json"),
+      JSON.stringify({ kind: "office", id: "test-office", name: "Unseated Office" }));
+    const policyPath = join(scratch, "policy.json");
+    writeFileSync(policyPath, JSON.stringify({
+      type: "ClaudeAgentHarnessProjection", actor: "urn:ame:test-actor",
+      rootOffice: "test-root-office",
+      colleagueOffices: ["content/offices/test-office.json"], ...seatings()
+    }));
+    assert.throws(() => projectClaudeHarness({ policyPath, repoRoot: scratch }),
+      /colleague office 'test-office' has no incumbency record/);
+    assert.throws(() => readFileSync(join(scratch, ".claude/agents/test-office.md"), "utf8"),
+      { code: "ENOENT" });
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
