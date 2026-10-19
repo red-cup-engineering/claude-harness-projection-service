@@ -6,8 +6,7 @@
   "description": "Projects a machine-specific Claude actor's office-roster policy into one project-local .claude/agents/ runtime substrate, by calling the settlement's own installing-claude-as-an-agent instrument once per colleague office.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/red-cup-engineering/claude-code-services-section.git",
-    "directory": "services/claude-code-harness-services-section/services/claude-harness-projection-service"
+    "url": "git+https://github.com/red-cup-engineering/claude-harness-projection-service.git"
   },
   "bin": {
     "project-claude-harness": "./scripts/project-claude-harness.mjs"
