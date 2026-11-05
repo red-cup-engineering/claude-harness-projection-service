@@ -17,7 +17,7 @@
     "verify": "npm run check && npm test"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "license": "MIT",
   "funding": {
