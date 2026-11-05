@@ -1,12 +1,18 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertPolicyActor } from "./actor.mjs";
+import { officeIncumbencyState } from "@red-cup-engineering/principal-office-seating-service";
+import {
+  checkSharedInstructionSources,
+  projectSharedInstructionSources,
+} from "@red-cup-engineering/agent-root-instructions-projection-service";
 
-// The projector never authors an agent file itself — it calls the one
-// instrument that does, found by the same up-walk every sibling caller in
-// this repo uses, never copied. See installing-claude-as-an-agent's own
-// header for what it refuses and why.
+// The projector delegates agent-file authoring to
+// installing-claude-as-an-agent's install script, found by the same up-walk
+// every sibling caller in this repo uses, rather than duplicating that logic
+// here.
 const PROJECTOR_SHAPE =
   "lib/emsenn/services/561-group/services/board-of-directors/services/executive-office/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
 
@@ -15,12 +21,23 @@ const PROJECTOR_SHAPE =
 // shape wins where it exists: it is the one the Group maintains.
 const REVIVED_PROJECTOR = join(dirname(fileURLToPath(import.meta.url)), "../scripts/install-claude-as-an-agent.js");
 
+const RECOVERED_PROJECTOR_SHAPE =
+  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
+
+
 export function resolveOfficeProjector(repoRoot) {
   const direct = join(repoRoot, PROJECTOR_SHAPE);
   if (existsSync(direct)) return direct;
+  const recovered = join(repoRoot, RECOVERED_PROJECTOR_SHAPE);
+  if (existsSync(recovered)) return recovered;
   if (existsSync(REVIVED_PROJECTOR)) return REVIVED_PROJECTOR;
   throw new Error(`office projector is absent at the expected repository shape: ${direct}`);
 }
+
+const CLAUDE_RUNTIME_INSTRUCTION_SOURCES = Object.freeze({
+  skillsPath: ".claude/skills",
+  rulesPath: ".claude/rules",
+});
 
 // A ClaudeAgentHarnessProjection: one machine actor's Claude harness policy.
 // Validated the same way codex-agent-harness.json is validated by its own
@@ -30,14 +47,12 @@ export function loadPolicy(policyPath) {
   if (policy.type !== "ClaudeAgentHarnessProjection") {
     throw new Error(`${policyPath} does not declare 'type: ClaudeAgentHarnessProjection'`);
   }
-  if (typeof policy.actor !== "string" || !policy.actor.startsWith("urn:ame:")) {
-    throw new Error(`${policyPath} names no valid actor urn`);
-  }
+  assertPolicyActor(policy.actor, policyPath);
   if (typeof policy.rootOffice !== "string" || !policy.rootOffice) {
     throw new Error(`${policyPath} names no rootOffice`);
   }
-  if (!Array.isArray(policy.colleagueOffices) || policy.colleagueOffices.length === 0) {
-    throw new Error(`${policyPath} requires a nonempty colleagueOffices roster`);
+  if (!Array.isArray(policy.colleagueOffices)) {
+    throw new Error(`${policyPath} requires a colleagueOffices roster`);
   }
   // office + character + recognition + induction = officer: colleagueOffices
   // names only the seat. A policy that named seats with no seating reference
@@ -87,10 +102,11 @@ function readManifest(target) {
   return readFileSync(file, "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
 }
 
-// Every office on the policy's roster, installed as a subagent at target by
-// the office projector — never by writing .claude/agents/*.md here. The root
-// office is never projected as a subordinate colleague: it is the identity a
-// session already holds, not one it dispatches to.
+// Every office on the policy's roster is installed as a subagent at target
+// by spawning the office projector as a subprocess (see
+// resolveOfficeProjector), which writes .claude/agents/*.md. The root office
+// is not projected as a subordinate colleague: it is the identity a session
+// already holds, not one it dispatches to.
 export function projectClaudeHarness({ policyPath, repoRoot, target = repoRoot, dryRun = false }) {
   repoRoot = resolve(repoRoot);
   target = resolve(target);
@@ -98,13 +114,13 @@ export function projectClaudeHarness({ policyPath, repoRoot, target = repoRoot, 
   if (colleagueIds(policy).includes(policy.rootOffice)) {
     throw new Error(`policy roster names its own rootOffice '${policy.rootOffice}' as a colleague — the root office is not projected as a subordinate`);
   }
-  // The root seat is checked by the same law, before any colleague is
+  // The root seat is validated the same way, before any colleague is
   // projected. loadPolicy only established that rootSeating names a character
   // and an incumbency at all; here — where repoRoot is held — those records
   // are resolved. The root office is not projected as a subagent, so the
-  // returned paths are not used: what is wanted is the refusal. A policy
-  // whose own root is bare projects nothing at all rather than dispatching a
-  // roster of colleagues out from under an officer who does not exist.
+  // returned paths go unused; this call is only for the validation, which
+  // throws if the root seat's records are missing or mismatched, so nothing
+  // gets projected under an invalid root.
   verifyIncumbency(policy.rootSeating, repoRoot, policy.rootOffice, "root");
   const projector = resolveOfficeProjector(repoRoot);
   const flags = dryRun ? ["--dry-run"] : [];
@@ -125,24 +141,36 @@ export function projectClaudeHarness({ policyPath, repoRoot, target = repoRoot, 
     }
     receipts.push(result.stdout.trim());
   }
-  return Object.freeze({ actor: policy.actor, target, colleagues: colleagueIds(policy), receipts, dryRun });
+  const sharedInstructionSources = dryRun
+    ? Object.freeze({ files: [] })
+    : projectSharedInstructionSources({ target, ...CLAUDE_RUNTIME_INSTRUCTION_SOURCES });
+  return Object.freeze({
+    actor: policy.actor,
+    target,
+    colleagues: colleagueIds(policy),
+    receipts,
+    sharedInstructionFiles: sharedInstructionSources.files,
+    dryRun,
+  });
 }
 
-// office + character + recognition + induction = officer, checked for real:
-// an office is refused rather than projected unless there is an incumbency
-// record that seats exactly this office id, whose holder resolves to an
-// existing character record of kind "session". A vacant seat (no incumbency,
-// or one that does not resolve) is dispatchable data, never a dispatchable
-// officer — this is the check that keeps this projector from ever again
-// seating a bare office, which is what
-// harness-seats-bare-offices-without-incumbency was raised against.
+// Before an office is projected as a subagent, this checks that it has a
+// real incumbency record: one that seats exactly this office id, settles to
+// the double-settlement state 'dignitas' (recognition and induction both
+// "t", via principal-office-seating-service's officeIncumbencyState over the record's own
+// recognition/induction fields), and whose holder resolves to an existing
+// character record of kind "session". A seat that is vacant, half-seated, in
+// repair (a Belnap "top" on either axis), failed (an explicit "f" on either
+// axis), or does not resolve at all throws instead of being projected — this
+// is the fix for harness-seats-bare-offices-without-incumbency, a bug where
+// offices were projected with no character record — and no settled
+// recognition/induction — behind them.
 //
-// One law, one implementation, applied to every seat the policy names. It
-// takes the seating pair rather than reading colleagueSeatings itself,
-// because rootSeating is the same pair under a different key and the root
-// office is subject to the same law: the seat a session already holds is not
-// exempt from having an officer behind it. `role` only names which seat is
-// being refused in the error; it never varies what is checked.
+// Shared by both the root seat and every colleague seat: it takes the
+// seating pair directly rather than reading colleagueSeatings itself, since
+// rootSeating is the same shape under a different key. `role` only names
+// which seat appears in the thrown error message; it never changes what is
+// checked.
 function verifyIncumbency(seating, repoRoot, id, role = "colleague") {
   const incumbencyPath = join(repoRoot, seating.incumbency);
   if (!existsSync(incumbencyPath)) {
@@ -159,6 +187,12 @@ function verifyIncumbency(seating, repoRoot, id, role = "colleague") {
   if (incumbency.office !== id) {
     throw new Error(
       `incumbency record ${incumbencyPath} seats office '${incumbency.office}', not '${id}' — refusing to project a bare office with no officer behind it`,
+    );
+  }
+  const settled = officeIncumbencyState({ recognition: incumbency.recognition, induction: incumbency.induction });
+  if (settled !== "dignitas") {
+    throw new Error(
+      `incumbency record ${incumbencyPath} for ${role} office '${id}' settles to '${settled}' (recognition=${incumbency.recognition}, induction=${incumbency.induction}), not the required double settlement 'dignitas' — refusing to project an officer whose recognition and induction are not both affirmed`,
     );
   }
   const characterPath = join(repoRoot, seating.character);
@@ -186,9 +220,78 @@ function verifyIncumbency(seating, repoRoot, id, role = "colleague") {
   return { characterPath, incumbencyPath };
 }
 
-// The roster-coverage check: the manifest and .claude/agents/ at target must
-// each name every one of the policy's colleagues. By default this is a
-// subset check, not exact-set equality — .claude/agents/ is one shared
+/**
+ * Verifies a harness policy's colleague seatings both ways, shared by every
+ * harness driver that consumes this projection service (owner-ruled
+ * 2026-09-04: seating verification lives once upstream, harnesses carry
+ * parameters only). Forward: every office in policy.colleagueOffices has a
+ * colleagueSeatings entry whose incumbency settles to dignitas and whose
+ * character is kind 'session' (verifyIncumbency). Reverse
+ * (seated-but-unrostered): a dignitas-settled incumbency under
+ * incumbenciesDir naming an office that is neither rootOffice nor on the
+ * roster is a seated officer nobody can dispatch, and refuses.
+ * @param {object} params
+ * @param {object} params.policy - parsed harness policy with colleagueOffices
+ *   (repoRoot-relative office paths) and colleagueSeatings (office id ->
+ *   {character, incumbency} repoRoot-relative paths)
+ * @param {string} params.repoRoot - root colleagueOffices/colleagueSeatings paths resolve against
+ * @param {string} params.incumbenciesDir - directory of incumbency JSON records scanned for the reverse gate
+ * @param {string} [params.rootOffice] - office id excluded from the reverse gate; defaults to policy.rootOffice
+ * @param {readonly string[]} [params.foreignOfficeSourceRoots] - repository-relative office roots belonging to other harnesses
+ * @returns {void}
+ * @throws {Error} on a missing/unsettled colleague seating or a seated-but-unrostered office
+ */
+export function verifySeatings({ policy, repoRoot, incumbenciesDir, rootOffice = policy.rootOffice, foreignOfficeSourceRoots = [] }) {
+  repoRoot = resolve(repoRoot);
+  const foreignRoots = foreignOfficeSourceRoots.map((sourceRoot) => {
+    if (typeof sourceRoot !== "string" || sourceRoot.length === 0 || isAbsolute(sourceRoot)) throw new TypeError("foreign office source roots must be nonempty repository-relative paths");
+    const normalized = resolve(repoRoot, sourceRoot);
+    const inside = relative(repoRoot, normalized);
+    if (inside === "" || inside === ".." || inside.startsWith(`..${sep}`)) throw new TypeError("foreign office source roots must be repository-relative paths");
+    return normalized;
+  });
+  for (const office of policy.colleagueOffices) {
+    const id = office.split("/").at(-1).replace(/\.json$/u, "");
+    const seating = policy.colleagueSeatings?.[id];
+    if (!seating || typeof seating.character !== "string" || typeof seating.incumbency !== "string") {
+      throw new Error(`policy names no seating (character + incumbency) for colleague office '${id}' in colleagueSeatings`);
+    }
+    verifyIncumbency(seating, repoRoot, id);
+  }
+  const rosterIds = new Set(colleagueIds(policy));
+  let files;
+  try {
+    files = readdirSync(incumbenciesDir).filter((name) => name.endsWith(".json"));
+  } catch {
+    files = [];
+  }
+  for (const file of files) {
+    const path = join(incumbenciesDir, file);
+    let incumbency;
+    try {
+      incumbency = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+    if (typeof incumbency.office !== "string" || incumbency.office === rootOffice) continue;
+    const settled = officeIncumbencyState({ recognition: incumbency.recognition, induction: incumbency.induction });
+    if (settled !== "dignitas" || rosterIds.has(incumbency.office)) continue;
+    const officeSource = incumbency?.["x-provenance"]?.["office-source"];
+    const normalizedSource = typeof officeSource === "string" ? resolve(repoRoot, officeSource) : undefined;
+    if (normalizedSource !== undefined && foreignRoots.some((foreignRoot) => normalizedSource === foreignRoot || normalizedSource.startsWith(`${foreignRoot}${sep}`))) continue;
+    throw new Error(
+      `seated-but-unrostered: office '${incumbency.office}' (incumbency ${file}) settles to dignitas ` +
+        `(recognition=${incumbency.recognition}, induction=${incumbency.induction}) but is absent from ` +
+        `colleagueOffices — a seated officer this policy never rosters cannot be dispatched.`,
+    );
+  }
+}
+
+// The roster and content check: the manifest and .claude/agents/ at target
+// must each name every one of the policy's colleagues, then the office
+// projector re-renders each colleague in --check mode and compares its bytes
+// without writing. By default roster membership is a subset check, not
+// exact-set equality — .claude/agents/ is one shared
 // directory a node's whole roster of independent offices and enterprises
 // populates, not a location this one policy owns exclusively. An entry this
 // policy did not name is another office's installed colleague, never this
@@ -230,5 +333,34 @@ export function checkExactRoster({ policyPath, repoRoot, target = repoRoot }) {
       throw new Error(`agent files at ${agentDir} exist for colleagues the owning policy never named: ${extraFiles.join(", ")}`);
     }
   }
-  return Object.freeze({ actor: policy.actor, target, colleagues: expected, ownsAgentDirectory: policy.ownsAgentDirectory === true });
+
+  verifyIncumbency(policy.rootSeating, repoRoot, policy.rootOffice, "root");
+  const projector = resolveOfficeProjector(repoRoot);
+  for (const office of policy.colleagueOffices) {
+    const id = office.split("/").at(-1).replace(/\.json$/u, "");
+    const { characterPath, incumbencyPath } = verifyIncumbency(policy.colleagueSeatings[id], repoRoot, id);
+    const poolFlags = (policy.skillPools ?? []).flatMap((pool) => ["--skills-pool", pool]);
+    const result = spawnSync(
+      process.execPath,
+      [projector, join(repoRoot, office), target, "--root", repoRoot, "--character", characterPath, "--incumbency", incumbencyPath, ...poolFlags, "--check"],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    if (result.status !== 0) {
+      throw new Error(`projected agent content has drifted for ${office}: ${result.stderr || result.stdout}`);
+    }
+  }
+
+  const sharedInstructionSources = checkSharedInstructionSources({
+    target,
+    ...CLAUDE_RUNTIME_INSTRUCTION_SOURCES,
+  });
+
+  return Object.freeze({
+    actor: policy.actor,
+    target,
+    colleagues: expected,
+    ownsAgentDirectory: policy.ownsAgentDirectory === true,
+    contentChecked: true,
+    sharedInstructionFiles: sharedInstructionSources.files,
+  });
 }

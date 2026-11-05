@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { checkExactRoster, colleagueIds, loadPolicy, projectClaudeHarness } from "../src/projector.mjs";
+import { checkExactRoster, colleagueIds, loadPolicy, projectClaudeHarness, resolveOfficeProjector } from "../src/projector.mjs";
 
 // A minimal, structurally-valid colleagueSeatings/rootSeating pair for a
 // fixture named "test-office" / "test-root-office" — the paths need not
@@ -24,7 +25,7 @@ function seatings(id = "test-office") {
 // seated at exactly this shape so a test exercises projectClaudeHarness's own
 // logic rather than tripping over an ⊥ absence that is not what it is about.
 const INSTALLER_SHAPE =
-  "lib/emsenn/services/561-group/services/board-of-directors/services/executive-office/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
+  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
 
 function stubInstaller(scratch, body = `console.log("stub-installed:", process.argv.slice(2).join(" "));`) {
   const installerPath = join(scratch, INSTALLER_SHAPE);
@@ -36,7 +37,7 @@ function stubInstaller(scratch, body = `console.log("stub-installed:", process.a
 // The office record plus the full officer quartet behind one colleague seat,
 // written so a test about the ROOT seat has nothing refusable in its
 // colleagues and its refusal can only be about the root.
-function seatColleague(scratch, id = "test-office") {
+function seatColleague(scratch, id = "test-office", { recognition = "t", induction = "t" } = {}) {
   mkdirSync(join(scratch, "content/offices"), { recursive: true });
   writeFileSync(join(scratch, `content/offices/${id}.json`), JSON.stringify({ kind: "office", id }));
   mkdirSync(join(scratch, "content/characters"), { recursive: true });
@@ -47,7 +48,7 @@ function seatColleague(scratch, id = "test-office") {
   mkdirSync(join(scratch, "content/incumbencies"), { recursive: true });
   writeFileSync(
     join(scratch, `content/incumbencies/${id}-as-${id}.json`),
-    JSON.stringify({ id: `${id}-session-as-${id}`, office: id, holder: `${id}-session`, recognition: "t", induction: "t", from: "2026-07-30" }),
+    JSON.stringify({ id: `${id}-session-as-${id}`, office: id, holder: `${id}-session`, recognition, induction, from: "2026-07-30" }),
   );
 }
 
@@ -55,7 +56,7 @@ function seatColleague(scratch, id = "test-office") {
 // office + character + recognition + induction quartet for the root seating
 // that a colleague seating gets, so a test about a colleague fails for its
 // colleague and never incidentally for an unseated root.
-function seatRoot(scratch, { office = "test-root-office", holder = "test-root-session", characterId = holder, kind = "session" } = {}) {
+function seatRoot(scratch, { office = "test-root-office", holder = "test-root-session", characterId = holder, kind = "session", recognition = "t", induction = "t" } = {}) {
   mkdirSync(join(scratch, "content/incumbencies"), { recursive: true });
   writeFileSync(
     join(scratch, "content/character.json"),
@@ -63,7 +64,7 @@ function seatRoot(scratch, { office = "test-root-office", holder = "test-root-se
   );
   writeFileSync(
     join(scratch, "content/incumbencies/root.json"),
-    JSON.stringify({ id: `${holder}-as-${office}`, office, holder, recognition: "t", induction: "t", from: "2026-07-30" }),
+    JSON.stringify({ id: `${holder}-as-${office}`, office, holder, recognition, induction, from: "2026-07-30" }),
   );
 }
 
@@ -75,7 +76,7 @@ test("loadPolicy refuses a policy naming its own root office as a colleague", ()
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -97,7 +98,7 @@ test("loadPolicy refuses a colleague office with no seating reference", () => {
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         colleagueSeatings: {},
@@ -110,15 +111,56 @@ test("loadPolicy refuses a colleague office with no seating reference", () => {
   }
 });
 
-test("loadPolicy refuses a policy with no colleagueOffices", () => {
+test("loadPolicy admits a root-only harness with an explicitly empty colleague roster", () => {
   const scratch = mkdtempSync(join(tmpdir(), "claude-harness-policy-"));
   try {
     const policyPath = join(scratch, "policy.json");
     writeFileSync(
       policyPath,
-      JSON.stringify({ type: "ClaudeAgentHarnessProjection", actor: "urn:ame:test-actor", rootOffice: "test-office", colleagueOffices: [] }),
+      JSON.stringify({
+        type: "ClaudeAgentHarnessProjection",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        rootOffice: "test-office",
+        colleagueOffices: [],
+        colleagueSeatings: {},
+        rootSeating: { character: "content/character.json", incumbency: "content/incumbency.json" },
+      }),
     );
-    assert.throws(() => loadPolicy(policyPath), /nonempty/);
+    assert.deepEqual(loadPolicy(policyPath).colleagueOffices, []);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("projects and checks the shared runtime instruction sources for Claude", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-harness-shared-instructions-"));
+  try {
+    const policyPath = join(scratch, "policy.json");
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        type: "ClaudeAgentHarnessProjection",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        rootOffice: "test-root-office",
+        colleagueOffices: [],
+        colleagueSeatings: {},
+        rootSeating: { character: "content/character.json", incumbency: "content/incumbencies/root.json" },
+      }),
+    );
+    seatRoot(scratch);
+    stubInstaller(scratch);
+
+    const projected = projectClaudeHarness({ policyPath, repoRoot: scratch });
+    assert.ok(projected.sharedInstructionFiles.includes(".claude/skills/improve-skills-before-work/SKILL.md"));
+    assert.ok(projected.sharedInstructionFiles.includes(".claude/rules/working-discipline.md"));
+    assert.ok(existsSync(join(scratch, ".claude/skills/improve-skills-before-work/SKILL.md")));
+    assert.ok(existsSync(join(scratch, ".claude/rules/working-discipline.md")));
+
+    const checked = checkExactRoster({ policyPath, repoRoot: scratch });
+    assert.deepEqual(checked.sharedInstructionFiles, projected.sharedInstructionFiles);
+
+    writeFileSync(join(scratch, ".claude/rules/working-discipline.md"), "drift\n");
+    assert.throws(() => checkExactRoster({ policyPath, repoRoot: scratch }), /shared instruction projection is stale/u);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -138,7 +180,7 @@ test("checkExactRoster ignores an unrelated agent installed by another policy", 
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -149,8 +191,13 @@ test("checkExactRoster ignores an unrelated agent installed by another policy", 
     writeFileSync(join(scratch, ".claude/.claude-agent-manifest"), "test-office\nunrelated-office\n");
     writeFileSync(join(agentDir, "test-office.md"), "# test office\n");
     writeFileSync(join(agentDir, "unrelated-office.md"), "# an unrelated office installed by a different policy\n");
+    seatColleague(scratch);
+    seatRoot(scratch);
+    stubInstaller(scratch);
+    projectClaudeHarness({ policyPath, repoRoot: scratch });
     const result = checkExactRoster({ policyPath, repoRoot: scratch });
     assert.deepEqual(result.colleagues, ["test-office"]);
+    assert.equal(result.contentChecked, true);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -169,7 +216,7 @@ test("checkExactRoster under ownsAgentDirectory refuses a seated colleague the p
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         ownsAgentDirectory: true,
         colleagueOffices: ["content/offices/test-office.json"],
@@ -181,6 +228,10 @@ test("checkExactRoster under ownsAgentDirectory refuses a seated colleague the p
     writeFileSync(join(scratch, ".claude/.claude-agent-manifest"), "test-office\noff-policy-office\n");
     writeFileSync(join(agentDir, "test-office.md"), "# test office\n");
     writeFileSync(join(agentDir, "off-policy-office.md"), "# a seat the owning policy never named\n");
+    seatColleague(scratch);
+    seatRoot(scratch);
+    stubInstaller(scratch);
+    projectClaudeHarness({ policyPath, repoRoot: scratch });
     assert.throws(() => checkExactRoster({ policyPath, repoRoot: scratch }), /seats colleagues the owning policy never named: off-policy-office/);
     writeFileSync(join(scratch, ".claude/.claude-agent-manifest"), "test-office\n");
     assert.throws(() => checkExactRoster({ policyPath, repoRoot: scratch }), /agent files at .* exist for colleagues the owning policy never named: off-policy-office/);
@@ -188,6 +239,74 @@ test("checkExactRoster under ownsAgentDirectory refuses a seated colleague the p
     const result = checkExactRoster({ policyPath, repoRoot: scratch });
     assert.deepEqual(result.colleagues, ["test-office"]);
     assert.equal(result.ownsAgentDirectory, true);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("checkExactRoster refuses generated agent content drift", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-harness-check-"));
+  try {
+    const policyPath = join(scratch, "policy.json");
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        type: "ClaudeAgentHarnessProjection",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        rootOffice: "test-root-office",
+        colleagueOffices: ["content/offices/test-office.json"],
+        ...seatings(),
+      }),
+    );
+    const agentDir = join(scratch, ".claude/agents");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(scratch, ".claude/.claude-agent-manifest"), "test-office\n");
+    writeFileSync(join(agentDir, "test-office.md"), "# stale generated content\n");
+    seatColleague(scratch);
+    seatRoot(scratch);
+    stubInstaller(
+      scratch,
+      `if (process.argv.includes("--check")) { console.error("fixture projection differs"); process.exit(1); }`,
+    );
+    assert.throws(
+      () => checkExactRoster({ policyPath, repoRoot: scratch }),
+      /projected agent content has drifted.*fixture projection differs/s,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the office installer check compares the installed agent with a fresh projection", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-agent-installer-check-"));
+  try {
+    const officeDir = join(scratch, "content/offices/test-office");
+    mkdirSync(join(officeDir, "skills/test-skill"), { recursive: true });
+    writeFileSync(
+      join(officeDir, "test-office.schema.json"),
+      JSON.stringify({
+        $id: "emsenn/office/test-office",
+        kind: "office",
+        id: "test-office",
+        name: "Test Office",
+        "normative-structure": "Tests the deterministic Claude agent projection.",
+        "deontic-profile": {},
+        "provides-skill": ["test-skill"],
+      }),
+    );
+    writeFileSync(
+      join(officeDir, "skills/test-skill/SKILL.md"),
+      "---\nname: test-skill\ndescription: Test fixture skill.\n---\n\nPerform the fixture duty.\n",
+    );
+    const installer = resolveOfficeProjector(scratch);
+    const install = spawnSync(process.execPath, [installer, officeDir, scratch, "--root", scratch], { encoding: "utf8" });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    const check = spawnSync(process.execPath, [installer, officeDir, scratch, "--root", scratch, "--check"], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stderr || check.stdout);
+    writeFileSync(join(scratch, ".claude/agents/test-office.md"), "# hand-edited output\n");
+    const drift = spawnSync(process.execPath, [installer, officeDir, scratch, "--root", scratch, "--check"], { encoding: "utf8" });
+    assert.notEqual(drift.status, 0);
+    assert.match(drift.stderr, /has drifted from the projection/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -201,7 +320,7 @@ test("checkExactRoster still refuses a colleague that never actually installed",
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -227,7 +346,7 @@ test("projectClaudeHarness refuses a colleague office whose incumbency does not 
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -267,7 +386,7 @@ test("projectClaudeHarness projects a colleague office that is seated", () => {
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -327,7 +446,7 @@ test("projectClaudeHarness refuses a root office whose incumbency does not resol
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -359,7 +478,7 @@ test("projectClaudeHarness refuses a root office whose incumbency holder is not 
       policyPath,
       JSON.stringify({
         type: "ClaudeAgentHarnessProjection",
-        actor: "urn:ame:test-actor",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         rootOffice: "test-root-office",
         colleagueOffices: ["content/offices/test-office.json"],
         ...seatings(),
@@ -384,12 +503,68 @@ test("projectClaudeHarness refuses a root office whose incumbency holder is not 
   }
 });
 
+// The double settlement doctrine (org-layering.md): office + character +
+// recognition + induction = officer, and BOTH recognition and induction must
+// affirm — not just office/holder id linkage. A colleague seat with a real,
+// office-matching incumbency record whose induction has never been read
+// (recognition "t", induction "bottom" — the schema's "recognition-only"
+// state) is still not a dignitas seating, and is refused before any
+// character check runs.
+test("projectClaudeHarness refuses a colleague seat settled to recognition-only, not dignitas", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-harness-dignitas-"));
+  try {
+    const policyPath = join(scratch, "policy.json");
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        type: "ClaudeAgentHarnessProjection",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        rootOffice: "test-root-office",
+        colleagueOffices: ["content/offices/test-office.json"],
+        ...seatings(),
+      }),
+    );
+    seatColleague(scratch, "test-office", { recognition: "t", induction: "bottom" });
+    stubInstaller(scratch);
+    seatRoot(scratch);
+    assert.throws(
+      () => projectClaudeHarness({ policyPath, repoRoot: scratch, dryRun: true }),
+      /settles to 'recognition-only' \(recognition=t, induction=bottom\), not the required double settlement 'dignitas'/,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
 
-/** Receiving: a non-Bare-Cedar-Fog repository calls the *actual* source-owned
- * installer, not a stub at the legacy absolute tree shape. Office, character,
- * and incumbency are real fixture records; the skill comes from a separately
- * selected projected pool that the ordinary recursive scan must ignore.
- */
+// The other half of the doctrine at the root seat: an explicit "f" on either
+// axis is the schema's "failed" state, not a repairable absence — the root
+// seat is subject to exactly the same double-settlement law as a colleague.
+test("projectClaudeHarness refuses a root seat settled to failed, not dignitas", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "claude-harness-dignitas-root-"));
+  try {
+    const policyPath = join(scratch, "policy.json");
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        type: "ClaudeAgentHarnessProjection",
+        actor: "actor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        rootOffice: "test-root-office",
+        colleagueOffices: ["content/offices/test-office.json"],
+        ...seatings(),
+      }),
+    );
+    seatColleague(scratch);
+    stubInstaller(scratch);
+    seatRoot(scratch, { recognition: "t", induction: "f" });
+    assert.throws(
+      () => projectClaudeHarness({ policyPath, repoRoot: scratch, dryRun: true }),
+      /settles to 'failed' \(recognition=t, induction=f\), not the required double settlement 'dignitas'/,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("portable owner installer receives seated office and independently projected skill", () => {
   const scratch = mkdtempSync(join(tmpdir(), "claude-harness-portable-"));
   try {

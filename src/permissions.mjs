@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { canonicalizeJsonValue } from "@red-cup-engineering/atomic-json-file-service/canonical";
+import { assertPolicyActor } from "./actor.mjs";
 
 // A ClaudePermissionProjection: one machine actor's Claude harness permission
 // block, projected from an enterprise-owned record into the target's
@@ -12,9 +14,7 @@ export function loadPermissionPolicy(policyPath) {
   if (policy.type !== "ClaudePermissionProjection") {
     throw new Error(`${policyPath} does not declare 'type: ClaudePermissionProjection'`);
   }
-  if (typeof policy.actor !== "string" || !policy.actor.startsWith("urn:ame:")) {
-    throw new Error(`${policyPath} names no valid actor urn`);
-  }
+  assertPolicyActor(policy.actor, policyPath);
   if (!Array.isArray(policy.allow) || policy.allow.some((rule) => typeof rule !== "string" || rule.trim() === "")) {
     throw new Error(`${policyPath} requires 'allow' as an array of nonempty permission rules`);
   }
@@ -22,12 +22,6 @@ export function loadPermissionPolicy(policyPath) {
     throw new Error(`${policyPath} declares an empty defaultMode`);
   }
   return Object.freeze(policy);
-}
-
-function canonical(value) {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
-  return JSON.stringify(value);
 }
 
 function settingsPath(target) {
@@ -71,7 +65,7 @@ export function checkPermissions({ policyPath, target }) {
     throw new Error(`no settings file at ${file} — the permission policy has never been projected here`);
   }
   const live = readSettings(target).permissions;
-  if (canonical(live) !== canonical(expected)) {
+  if (canonicalizeJsonValue(live) !== canonicalizeJsonValue(expected)) {
     throw new Error(`permissions at ${file} have drifted from the policy record: live ${JSON.stringify(live)} vs record ${JSON.stringify(expected)}`);
   }
   return Object.freeze({ actor: policy.actor, target, file, permissions: expected });

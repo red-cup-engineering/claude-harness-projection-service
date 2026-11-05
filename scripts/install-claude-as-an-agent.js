@@ -688,6 +688,15 @@ function doInstall(office, node, rendered) {
   console.log(`install-claude-as-an-agent: installed agent '${office.id}' into ${rel(node)}.`);
 }
 
+function doCheck(office, node, rendered) {
+  const target = agentTarget(node, office);
+  if (!readManifest(node).includes(office.id)) die(`agent '${office.id}' is absent from the installed manifest.`);
+  if (!existsSync(target) || readFileSync(target, "utf8") !== rendered) {
+    die(`${rel(target)} has drifted from the projection of ${rel(office.record)}.`);
+  }
+  console.log(`install-claude-as-an-agent: checked agent '${office.id}' at ${rel(node)}.`);
+}
+
 // --- main ----------------------------------------------------------------------------
 
 const FLAGS_TAKING_VALUE = new Set(["--root", "--from", "--character", "--incumbency", "--skills-pool"]);
@@ -711,7 +720,9 @@ if (process.argv.includes("--clean")) {
   const skills = findSkills(office, duties);
   checkSkills(skills, office);
   const seating = resolveSeating(office);
-  if (process.argv.includes("--list")) {
+  if (process.argv.includes("--check")) {
+    doCheck(office, node, renderAgent(office, duties, skills, seating));
+  } else if (process.argv.includes("--list")) {
     doList(office, node, duties, skills);
   } else {
     if (process.argv.includes("--reinstall")) doClean(office, node);

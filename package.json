@@ -12,7 +12,7 @@
     "project-claude-harness": "./scripts/project-claude-harness.mjs"
   },
   "scripts": {
-    "check": "node --check src/projector.mjs && node --check scripts/project-claude-harness.mjs",
+    "check": "node --check src/projector.mjs && node --check scripts/project-claude-harness.mjs && node --check src/permissions.mjs && node --check src/hooks.mjs && node --check src/actor.mjs && node --check src/index.mjs && node --check scripts/install-claude-as-an-agent.js",
     "test": "node --test test/*.test.mjs",
     "verify": "npm run check && npm test"
   },
@@ -23,5 +23,16 @@
   "funding": {
     "type": "individual",
     "url": "https://github.com/561-group/.github/blob/main/TIPS.md"
+  },
+  "dependencies": {
+    "@red-cup-engineering/agent-root-instructions-projection-service": "0.7.12",
+    "@red-cup-engineering/principal-office-seating-service": "0.1.4",
+    "@red-cup-engineering/atomic-json-file-service": "0.1.0"
+  },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./hooks": "./src/hooks.mjs",
+    "./permissions": "./src/permissions.mjs",
+    "./projector": "./src/projector.mjs"
   }
 }
