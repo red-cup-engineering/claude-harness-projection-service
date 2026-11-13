@@ -22,7 +22,7 @@ const PROJECTOR_SHAPE =
 const REVIVED_PROJECTOR = join(dirname(fileURLToPath(import.meta.url)), "../scripts/install-claude-as-an-agent.js");
 
 const RECOVERED_PROJECTOR_SHAPE =
-  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
+  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-science-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
 
 
 export function resolveOfficeProjector(repoRoot) {

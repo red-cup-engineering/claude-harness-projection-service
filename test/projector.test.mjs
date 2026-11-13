@@ -25,7 +25,7 @@ function seatings(id = "test-office") {
 // seated at exactly this shape so a test exercises projectClaudeHarness's own
 // logic rather than tripping over an ⊥ absence that is not what it is about.
 const INSTALLER_SHAPE =
-  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
+  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-science-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
 
 function stubInstaller(scratch, body = `console.log("stub-installed:", process.argv.slice(2).join(" "));`) {
   const installerPath = join(scratch, INSTALLER_SHAPE);
