@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { canonicalizeJsonValue } from "@red-cup-engineering/atomic-json-file-service/canonical";
+import { canonicalizeJson } from "@red-cup-engineering/json-engine/canonical-json";
 import { assertPolicyActor } from "./actor.mjs";
 
 // A ClaudePermissionProjection: one machine actor's Claude harness permission
@@ -65,7 +65,7 @@ export function checkPermissions({ policyPath, target }) {
     throw new Error(`no settings file at ${file} — the permission policy has never been projected here`);
   }
   const live = readSettings(target).permissions;
-  if (canonicalizeJsonValue(live) !== canonicalizeJsonValue(expected)) {
+  if (canonicalizeJson(live).text !== canonicalizeJson(expected).text) {
     throw new Error(`permissions at ${file} have drifted from the policy record: live ${JSON.stringify(live)} vs record ${JSON.stringify(expected)}`);
   }
   return Object.freeze({ actor: policy.actor, target, file, permissions: expected });

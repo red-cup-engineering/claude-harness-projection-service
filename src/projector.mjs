@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPolicyActor } from "./actor.mjs";
-import { officeIncumbencyState } from "@red-cup-engineering/principal-office-seating-service";
+import { seatState } from "@red-cup-engineering/organizing/agency";
 import {
   checkSharedInstructionSources,
   projectSharedInstructionSources,
@@ -157,7 +157,7 @@ export function projectClaudeHarness({ policyPath, repoRoot, target = repoRoot, 
 // Before an office is projected as a subagent, this checks that it has a
 // real incumbency record: one that seats exactly this office id, settles to
 // the double-settlement state 'dignitas' (recognition and induction both
-// "t", via principal-office-seating-service's officeIncumbencyState over the record's own
+// "t", via organizing's seatState over the record's own
 // recognition/induction fields), and whose holder resolves to an existing
 // character record of kind "session". A seat that is vacant, half-seated, in
 // repair (a Belnap "top" on either axis), failed (an explicit "f" on either
@@ -189,7 +189,7 @@ function verifyIncumbency(seating, repoRoot, id, role = "colleague") {
       `incumbency record ${incumbencyPath} seats office '${incumbency.office}', not '${id}' — refusing to project a bare office with no officer behind it`,
     );
   }
-  const settled = officeIncumbencyState({ recognition: incumbency.recognition, induction: incumbency.induction });
+  const settled = seatState(incumbency);
   if (settled !== "dignitas") {
     throw new Error(
       `incumbency record ${incumbencyPath} for ${role} office '${id}' settles to '${settled}' (recognition=${incumbency.recognition}, induction=${incumbency.induction}), not the required double settlement 'dignitas' — refusing to project an officer whose recognition and induction are not both affirmed`,
@@ -274,7 +274,7 @@ export function verifySeatings({ policy, repoRoot, incumbenciesDir, rootOffice =
       continue;
     }
     if (typeof incumbency.office !== "string" || incumbency.office === rootOffice) continue;
-    const settled = officeIncumbencyState({ recognition: incumbency.recognition, induction: incumbency.induction });
+    const settled = seatState(incumbency);
     if (settled !== "dignitas" || rosterIds.has(incumbency.office)) continue;
     const officeSource = incumbency?.["x-provenance"]?.["office-source"];
     const normalizedSource = typeof officeSource === "string" ? resolve(repoRoot, officeSource) : undefined;

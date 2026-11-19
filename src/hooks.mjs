@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { canonicalizeJsonValue } from "@red-cup-engineering/atomic-json-file-service/canonical";
-import { writeJsonAtomically } from "@red-cup-engineering/atomic-json-file-service/write";
+import { canonicalizeJson } from "@red-cup-engineering/json-engine/canonical-json";
+import { writeFileAtomic } from "@red-cup-engineering/computer-engine/filesystem";
 import { assertPolicyActor } from "./actor.mjs";
 
 const EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]);
@@ -131,7 +131,7 @@ function projectedHooks(settings, policy, catalog, owned) {
       const module = moduleFromArgument(handler?.args?.[0]);
       const currentModule = owned.relocations.get(module) ?? (module && [...owned.relocations.values()].includes(module) ? module : null);
       const relocatedHandler = currentModule && { ...handler, args: [portableModule(currentModule), ...handler.args.slice(1)] };
-      const key = relocatedHandler && canonicalizeJsonValue({ event, matcher: groupMatcher(group), handler: relocatedHandler });
+      const key = relocatedHandler && canonicalizeJson({ event, matcher: groupMatcher(group), handler: relocatedHandler }).text;
       if (key && !relocated.has(key) && isOwnedCommand(handler, modules)) {
         relocated.set(key, { event, matcher: groupMatcher(group), handler: relocatedHandler });
       }
@@ -183,7 +183,7 @@ export function projectLifecycleHooks({ policyPath, target, handlerCatalog, prio
   const file = settingsPath(target);
   const settings = readSettings(target);
   const hooks = projectedHooks(settings, policy, catalog, owned);
-  if (!dryRun) writeJsonAtomically(file, { ...settings, hooks }, { mode: 0o600 });
+  if (!dryRun) writeFileAtomic(file, `${JSON.stringify({ ...settings, hooks }, null, 2)}\n`, { mode: 0o600 });
   return Object.freeze({ actor: policy.actor, owner: policy.owner, target, file, handlers: policy.handlers, dryRun });
 }
 
@@ -218,7 +218,7 @@ export function checkLifecycleHooks({ policyPath, target, handlerCatalog, priorO
       if (isOwnedCommand(handler, modules)) expected.push({ event, matcher: groupMatcher(group), handler });
     }
   }
-  const ordered = (values) => [...values].sort((left, right) => canonicalizeJsonValue(left).localeCompare(canonicalizeJsonValue(right)));
-  if (canonicalizeJsonValue(ordered(observed)) !== canonicalizeJsonValue(ordered(expected))) throw new Error(`Claude lifecycle hooks at ${file} have drifted from owner '${policy.owner}'`);
+  const ordered = (values) => [...values].sort((left, right) => canonicalizeJson(left).text.localeCompare(canonicalizeJson(right).text));
+  if (canonicalizeJson(ordered(observed)).text !== canonicalizeJson(ordered(expected)).text) throw new Error(`Claude lifecycle hooks at ${file} have drifted from owner '${policy.owner}'`);
   return Object.freeze({ actor: policy.actor, owner: policy.owner, target, file, handlers: policy.handlers });
 }
