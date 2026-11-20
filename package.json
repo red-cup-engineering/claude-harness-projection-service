@@ -27,7 +27,8 @@
     "@red-cup-engineering/agent-root-instructions-projection-service": "^0.9.4",
     "@red-cup-engineering/json-engine": "^0.5.0",
     "@red-cup-engineering/computer-engine": "^0.1.37",
-    "@red-cup-engineering/organizing": "^0.9.0"
+    "@red-cup-engineering/organizing": "^0.9.0",
+    "@red-cup-engineering/parse-javascript-argv-service": "^0.3.0 || 0.3.1-dev.0"
   },
   "exports": {
     ".": "./src/index.mjs",

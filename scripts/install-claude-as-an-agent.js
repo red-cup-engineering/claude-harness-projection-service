@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { argValue } from "@red-cup-engineering/parse-javascript-argv-service";
 // install-claude-as-an-agent — install ONE office into ONE node of the tree as a
 // SUBAGENT: a single file at <node>/.claude/agents/<office-id>.md.
 //
@@ -84,10 +85,7 @@ const SKIP_DIRS = new Set([
   "preservation",
 ]);
 
-function argValue(flag) {
-  const i = process.argv.indexOf(flag);
-  return i !== -1 ? process.argv[i + 1] : undefined;
-}
+
 
 function die(message) {
   console.error(`install-claude-as-an-agent: ${message}`);
