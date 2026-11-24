@@ -12,7 +12,7 @@
     "project-claude-harness": "./scripts/project-claude-harness.mjs"
   },
   "scripts": {
-    "check": "node --check src/projector.mjs && node --check scripts/project-claude-harness.mjs && node --check src/permissions.mjs && node --check src/hooks.mjs && node --check src/actor.mjs && node --check src/index.mjs && node --check scripts/install-claude-as-an-agent.js",
+    "check": "node --check src/projector.mjs && node --check scripts/project-claude-harness.mjs && node --check src/permissions.mjs && node --check src/hooks.mjs && node --check src/actor.mjs && node --check src/index.mjs",
     "verify": "npm run check"
   },
   "engines": {
@@ -24,6 +24,7 @@
     "url": "https://github.com/561-group/.github/blob/main/TIPS.md"
   },
   "dependencies": {
+    "@red-cup-engineering/claude-code-agent-harness-computer-system-engineering-services-section": "^0.1.1-dev.0",
     "@red-cup-engineering/agent-root-instructions-projection-service": "^0.9.4",
     "@red-cup-engineering/json-engine": "^0.5.0",
     "@red-cup-engineering/computer-engine": "^0.1.37",

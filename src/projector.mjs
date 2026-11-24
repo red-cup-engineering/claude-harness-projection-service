@@ -9,29 +9,13 @@ import {
   projectSharedInstructionSources,
 } from "@red-cup-engineering/agent-root-instructions-projection-service";
 
-// The projector delegates agent-file authoring to
-// installing-claude-as-an-agent's install script, found by the same up-walk
-// every sibling caller in this repo uses, rather than duplicating that logic
-// here.
-const PROJECTOR_SHAPE =
-  "lib/emsenn/services/561-group/services/board-of-directors/services/executive-office/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
+// The projector delegates agent-file authoring to the Claude Code harness section's one office installer
+// (`scripts/install-claude-as-an-agent.mjs`, which reads agent records through the agency reader), found through
+// the harness package; there is no second copy of it here.
+const OFFICE_PROJECTOR_PACKAGE = "@red-cup-engineering/claude-code-agent-harness-computer-system-engineering-services-section/package.json";
 
-// The instrument is revived beside this projector (scripts/), so a repository
-// that does not hold Bare Cedar Fog's tree can still project. The repository
-// shape wins where it exists: it is the one the Group maintains.
-const REVIVED_PROJECTOR = join(dirname(fileURLToPath(import.meta.url)), "../scripts/install-claude-as-an-agent.js");
-
-const RECOVERED_PROJECTOR_SHAPE =
-  "lib/emsenn/services/561-group/services/science-services-section/services/information-science-services-section/services/knowledge-services-section/services/divination-science-services-section/lib/management/skills/installing-claude-as-an-agent/scripts/install-claude-as-an-agent.js";
-
-
-export function resolveOfficeProjector(repoRoot) {
-  const direct = join(repoRoot, PROJECTOR_SHAPE);
-  if (existsSync(direct)) return direct;
-  const recovered = join(repoRoot, RECOVERED_PROJECTOR_SHAPE);
-  if (existsSync(recovered)) return recovered;
-  if (existsSync(REVIVED_PROJECTOR)) return REVIVED_PROJECTOR;
-  throw new Error(`office projector is absent at the expected repository shape: ${direct}`);
+export function resolveOfficeProjector() {
+  return join(dirname(fileURLToPath(import.meta.resolve(OFFICE_PROJECTOR_PACKAGE))), "scripts/install-claude-as-an-agent.mjs");
 }
 
 const CLAUDE_RUNTIME_INSTRUCTION_SOURCES = Object.freeze({
@@ -122,18 +106,17 @@ export function projectClaudeHarness({ policyPath, repoRoot, target = repoRoot, 
   // throws if the root seat's records are missing or mismatched, so nothing
   // gets projected under an invalid root.
   verifyIncumbency(policy.rootSeating, repoRoot, policy.rootOffice, "root");
-  const projector = resolveOfficeProjector(repoRoot);
+  const projector = resolveOfficeProjector();
   const flags = dryRun ? ["--dry-run"] : [];
   const receipts = [];
   for (const office of policy.colleagueOffices) {
     const officePath = join(repoRoot, office);
     if (!existsSync(officePath)) throw new Error(`policy names an office that seats nowhere: ${officePath}`);
     const id = office.split("/").at(-1).replace(/\.json$/u, "");
-    const { characterPath, incumbencyPath } = verifyIncumbency(policy.colleagueSeatings[id], repoRoot, id);
-    const poolFlags = (policy.skillPools ?? []).flatMap((pool) => ["--skills-pool", pool]);
+    verifyIncumbency(policy.colleagueSeatings[id], repoRoot, id);
     const result = spawnSync(
       process.execPath,
-      [projector, officePath, target, "--root", repoRoot, "--character", characterPath, "--incumbency", incumbencyPath, ...poolFlags, ...flags],
+      [projector, officePath, target, "--root", repoRoot, ...flags],
       { cwd: repoRoot, encoding: "utf8" },
     );
     if (result.status !== 0) {
@@ -335,14 +318,13 @@ export function checkExactRoster({ policyPath, repoRoot, target = repoRoot }) {
   }
 
   verifyIncumbency(policy.rootSeating, repoRoot, policy.rootOffice, "root");
-  const projector = resolveOfficeProjector(repoRoot);
+  const projector = resolveOfficeProjector();
   for (const office of policy.colleagueOffices) {
     const id = office.split("/").at(-1).replace(/\.json$/u, "");
-    const { characterPath, incumbencyPath } = verifyIncumbency(policy.colleagueSeatings[id], repoRoot, id);
-    const poolFlags = (policy.skillPools ?? []).flatMap((pool) => ["--skills-pool", pool]);
+    verifyIncumbency(policy.colleagueSeatings[id], repoRoot, id);
     const result = spawnSync(
       process.execPath,
-      [projector, join(repoRoot, office), target, "--root", repoRoot, "--character", characterPath, "--incumbency", incumbencyPath, ...poolFlags, "--check"],
+      [projector, join(repoRoot, office), target, "--root", repoRoot, "--check"],
       { cwd: repoRoot, encoding: "utf8" },
     );
     if (result.status !== 0) {
